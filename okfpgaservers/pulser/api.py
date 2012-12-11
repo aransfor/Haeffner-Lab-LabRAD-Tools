@@ -197,4 +197,4 @@ class api():
         
     def setDACVoltage(self, volstr):
         if not self.haveDAC: raise Exception ("No DAC")
-        self.xem.WriteToBlockPipeIn(0x82, 2, volstr)   
+        self.xem.WriteToBlockPipeIn(0x82, 2, volstr)

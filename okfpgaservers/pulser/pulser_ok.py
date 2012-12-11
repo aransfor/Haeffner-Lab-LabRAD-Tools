@@ -25,10 +25,11 @@ import time
 from hardwareConfiguration import hardwareConfiguration
 from sequence import Sequence
 from dds import DDS
+from ttl import TTL
 from api import api
 import numpy
 
-class Pulser(LabradServer, DDS):
+class Pulser(LabradServer, DDS, TTL):
     
     name = 'Pulser'
     onSwitch = Signal(611051, 'signal: switch toggled', '(ss)')
@@ -129,7 +130,7 @@ class Pulser(LabradServer, DDS):
         yield deferToThread(self.api.startSingle)
         self.sequenceType = 'One'
         self.inCommunication.release()
-    
+    '''
     @setting(5, 'Add TTL Pulse', channel = 's', start = 'v[s]', duration = 'v[s]')
     def addTTLPulse(self, c, channel, start, duration):
         """
@@ -156,7 +157,7 @@ class Pulser(LabradServer, DDS):
             start = pulse[1]
             duration = pulse[2]
             yield self.addTTLPulse(c, channel, start, duration)
-    
+   ''' 
     @setting(7, "Extend Sequence Length", timeLength = 'v[s]')
     def extendSequenceLength(self, c, timeLength):
         """
@@ -216,7 +217,7 @@ class Pulser(LabradServer, DDS):
         if not sequence: raise Exception ("Please create new sequence first")
         ttl,dds = sequence.humanRepresentation()
         return dds
-    
+    '''
     @setting(12, 'Get Channels', returns = '*(sw)')
     def getChannels(self, c):
         """
@@ -276,7 +277,8 @@ class Pulser(LabradServer, DDS):
         channel = self.channelDict[channelName]
         answer = (channel.ismanual,channel.manualstate,channel.manualinv,channel.autoinv)
         return answer
-    
+    '''
+
     @setting(16, 'Wait Sequence Done', timeout = 'v', returns = 'b')
     def waitSequenceDone(self, c, timeout = None):
         """

@@ -3,6 +3,18 @@ import array
 from hardwareConfiguration import hardwareConfiguration
 from decimal import Decimal
 
+class ttl_pulse(object):
+    def __init__(self, channel, start, end):
+        # during a pulse the device is assumed to be ON
+        self.channel = channel
+        self.start = start # time step
+        self.end = end # time step
+        #self.isInverted = self.checkIsInverted()
+
+    def checkIsInverted(self):
+        if self.channel in hc.invertedChannels: return True
+        else: return False
+
 class Sequence():
     """Sequence for programming pulses"""
     def __init__(self, parent):
@@ -19,20 +31,30 @@ class Sequence():
         #dictionary for storing information about dds switches, in the format:
         #timestep: {channel_name: integer representing the state}
         self.ddsSettingList = []
+        self.pulseDict = {}
+        self.setupInversions()
         self.advanceDDS = hardwareConfiguration.channelDict['AdvanceDDS'].channelnumber
         self.resetDDS = hardwareConfiguration.channelDict['ResetDDS'].channelnumber
+
+    def setupInversions(self):
+        self.invertedChannels = numpy.zeros(self.channelTotal)
+        for channel in hardwareConfiguration.channelDict.values():
+            if channel.isInverted: self.invertedChannels[channel.channelnumber] = 1
     
     def addDDS(self, name, start, num, typ):
         timeStep = self.secToStep(start)
         self.ddsSettingList.append((name, timeStep, num, typ))
-            
-    def addPulse(self, channel, start, duration):
-        """adding TTL pulse, times are in seconds"""
-        start = self.secToStep(start)
+
+    def addTTL(self, name, duration):
+        """ pulse times in seconds """
+        timeStep = self.secToStep(start)
         duration = self.secToStep(duration)
-        self._addNewSwitch(start, channel, 1)
-        self._addNewSwitch(start + duration, channel, -1)
-    
+        channel = hardwareConfiguration.channelDict[name].channelnumber
+        pulse = ttl_pulse(channel, timeStep, timeStep + duration)
+        if name in pulseDict.keys():
+            pulseDict[name].append(pulse)
+        else: pulseDict[channel] = [pulse]
+        
     def extendSequenceLength(self, timeLength):
         """Allows to extend the total length of the sequence"""
         timeLength = self.secToStep(timeLength)
@@ -70,7 +92,7 @@ class Sequence():
     
     def userAddedDDS(self):
         return bool(len(self.ddsSettingList))
-    
+            
     def parseDDS(self):
         if not self.userAddedDDS(): return None
         state = self.parent._getCurrentDDS()
@@ -120,6 +142,44 @@ class Sequence():
             else:
                 state[name] = num
                 pulses_end[name] = (start, typ)
+   
+    def merge_adjacent_ttl(self, pulse_list):
+        '''
+        Merge adjaced ttl pulses when they are back to back
+        '''
+
+        merged = []
+        pulses_sorted_by_start = sorted(pulse_list, key = lambda pulse: pulse.start)
+
+        if not pulses_sorted_by_start: return merged
+
+        last_pulse = pulses_sorted_by_start.pop(0) # pulse prior the current one
+
+        while pulses_sorted_by_start:
+
+            merged.append(last_pulse) #should this go here or at end of loop???
+            
+            pulse = pulses_sorted_by_start.pop(0) # current pulse
+            if last_pulse.end == pulse.start: # two adjacent pulses
+                last_pulse.end = pulse.end
+            else:
+                # check for errors
+                last_pulse = pulse
+            
+            #merged.append(last_pulse) # always ignores the first pulse
+
+        return merged
+
+    def get_all_pulses(self):
+        all_pulses = []
+        for pulse_list in self.pulseDict.itervalues():
+            '''
+            Go channel by channel removing adjacent pulses.
+            Then make a list of all the pulses.
+            '''
+            merged = merge_adjacent_ttl(pulse_list)
+            all_pulses.extend(merged)
+        return all_pulses
 
     def addToProgram(self, prog, state):
         for name,num in state.iteritems():
@@ -128,19 +188,38 @@ class Sequence():
             else:  
                 buf = self.parent._intToBuf_remote(num)
             prog[name] += buf
-        
+
     def parseTTL(self):
-        """Returns the representation of the sequence for programming the FPGA"""
+        """ Return representation of sequence for programming FPGA """
+        all_pulses = self.get_all_pulses()
+        if not all_pulses: return None
+        state = self.parent._getCurrentTTL()
+        
+        pulses_sorted_by_start = sorted(all_pulses, key = lambda:pulse: pulse.start)
+        # be careful! pulses_sorted_by_start is a collection of pulses across ALL
+        # channels, sorted only by start time. It is quite likely that multiple
+        # pulses will have the same start time. This is ok.
+
+        pulse = pulses_sorted_by_start.pop(0)
+
+        while pulses_sorted_by_start:
+            self._addNewSwitch(pulse.start, pulse.channel, 1)
+            self._addNewSwitch(pulse.end, pulse.channel, -1)
+            pulse = pulses_sorted_by_start.pop(0)
+
         rep = ''
+        
         lastChannels = numpy.zeros(self.channelTotal)
         powerArray = 2**numpy.arange(self.channelTotal, dtype = numpy.uint64)
-        for key,newChannels in sorted(self.switchingTimes.iteritems()):
-            channels = lastChannels + newChannels #computes the action of switching on the state
-            if (channels < 0).any(): raise Exception ('Trying to switch off channel that is not already on')
-            channelInt = numpy.dot(channels,powerArray)
-            rep = rep + self.numToHex(key) + self.numToHex(channelInt) #converts the new state to hex and adds it to the sequence
+        for key, newChannels in sorted(self.switchingTimes.iteritems()):
+            # key is the time step number
+            channels = lastChannels + newChannels # compute the action of switching on the state
+            
+            channelTTLLevels = numpy.logical_xor(channels, self.invertedChannels)
+            channelInt = numpy.dot(channelTTLLevels, powerArray)
+            rep = rep + self.numToHex(key) + self.numToHex(channelInt)
             lastChannels = channels
-        rep = rep + 2*self.numToHex(0) #adding termination
+        rep = rep + 2*self.numToHex(0) # termination
         return rep
     
     def humanRepresentation(self):
