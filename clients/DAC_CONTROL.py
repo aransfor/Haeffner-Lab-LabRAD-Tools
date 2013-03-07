@@ -23,6 +23,8 @@ class MULTIPOLE_CONTROL(QtGui.QWidget):
         self.controls['U1'] = QCustomSpinBox('U1', (-2., 2.))
         self.controls['U2'] = QCustomSpinBox('U2', (0., 20.))
         self.controls['U3'] = QCustomSpinBox('U3', (-2., 2.))
+        self.controls['U4'] = QCustomSpinBox('U4', (0., 10.))
+        self.controls['U5'] = QCustomSpinBox('U5', (0., 10.))
         self.multipoleValues = {k: 0.0 for k in hc.multipoles}
         self.ctrlLayout = QtGui.QVBoxLayout()
         for k in hc.multipoles:
@@ -127,8 +129,7 @@ class CHANNEL_CONTROL (QtGui.QWidget):
 
         layout.setColumnStretch(1, 1)                   
         self.setLayout(layout)
-	
-            
+
     @inlineCallbacks
     def connect(self):
         from labrad.wrappers import connectAsync

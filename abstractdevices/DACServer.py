@@ -89,7 +89,6 @@ class Queue( object ):
 
     def insert( self, v ):
         ''' Always insert voltages to the current queue position '''
-        print 'set: ', self.currentSet
         v.program(self.currentSet)
         self.setDict[self.currentSet].append(v)
 
@@ -150,11 +149,13 @@ class DACServer( LabradServer ):
         # yield self.setIndividualDigitalVoltages(0, [('RF bias', 32768)], 0)
         yield self.registry.cd(self.registryPath)
         try:
-            CfilePath = yield self.registry.get('MostRecent')
+            CfilePath = yield self.registry.get('MostRecentCfile')
             yield self.setMultipoleControlFile(0, CfilePath)
         except: 
             self.multipoleMatrix = {k: {j: [.1] for j in hc.multipoles} for k in hc.elecDict.keys()} # if no previous Cfile was set, set all entries to zero.
             self.numCols = 1
+        try: self.currentPosition = yield self.registry('position')
+        except: self.currentPosition = 0
         try: ms = yield self.registry.get('MultipoleSet')                    
         except: ms = [(k, 0) for k in hc.multipoles] # if no previous multipole values have been recorded, set them to zero. 
         yield self.setMultipoleValues(0, ms)
@@ -221,8 +222,8 @@ class DACServer( LabradServer ):
         for (port, av) in analogVoltages:
             self.queue.insert(Voltage(self.dacDict[port], analogVoltage = av))
             if self.dacDict[port].smaOutNumber:
-                self.registry.cd(self.registryPath + ['smaVoltages'])
-                self.registry.set(port, av)
+                yield self.registry.cd(self.registryPath + ['smaVoltages'])
+                yield self.registry.set(port, av)
         yield self.sendToPulser(c)
 
     @setting( 4, "Get Analog Voltages", returns = '*(sv)' )
@@ -257,7 +258,7 @@ class DACServer( LabradServer ):
         if self.numCols > 1:
             voltageMatrix = self.interpolateVoltageMatrix(voltageMatrix)
         self.voltageMatrix = voltageMatrix
-        yield self.setVoltages(c)
+        yield self.setVoltages(c, newPosition = self.currentPosition)
 
         yield self.registry.cd(self.registryPath)
         yield self.registry.set('MultipoleSet', ms)
@@ -291,6 +292,9 @@ class DACServer( LabradServer ):
             for s in hc.smaDict.keys(): newVoltageSet.append( (s, self.currentVoltages[s]) )
         yield self.setIndividualAnalogVoltages(c, newVoltageSet)
         self.currentPosition = n
+
+        print self.currentPosition
+        yield self.registry.set('position', n)
 
     @setting( 9, "Set First Voltages")
     def setFirstVoltages(self, c):
