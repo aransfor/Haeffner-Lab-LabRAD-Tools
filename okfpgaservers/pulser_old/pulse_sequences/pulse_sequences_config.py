@@ -41,9 +41,9 @@ class double_pass_729(dds_channel):
         
 #defining available dds channels
 dds729DP = double_pass_729('729')
+dds397DP = dds_channel('397')
 dds866DP = dds_channel('866')
 dds854DP = dds_channel('854')
-dds397DP = dds_channel('397')
 
 '''
 channel_dictionary provides a translation between the channels of the pulse sequence
