@@ -244,12 +244,14 @@ class DACServer( LabradServer ):
     def setDACVoltages(self, stringy):
         yield self.inCommunication.acquire()
         yield deferToThread(self.api.setDACVoltage, stringy)
+        # self.api.setDACVoltage(stringy)
         self.inCommunication.release()
     
     @inlineCallbacks
     def resetFIFODAC(self):
         yield self.inCommunication.acquire()
-        yield deferToThread(self.api.resetFIFODAC)        
+        yield deferToThread(self.api.resetFIFODAC)
+        # self.api.resetFIFODAC()
         self.inCommunication.release()            
 
     @setting( 2, "Set Digital Voltages", digitalVoltages = '*v', setNum = 'i', returns = '')

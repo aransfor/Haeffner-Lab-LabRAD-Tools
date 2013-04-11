@@ -22,7 +22,7 @@ class hardwareConfiguration(object):
     EXPNAME = 'CCT'
     defaultMultipoles = ['Ex', 'Ey', 'Ez', 'U1', 'U2', 'U3']
     okDeviceID = 'DAC Controller'
-    okDeviceFile = 'control_faster.bit'
+    okDeviceFile = 'control_nonnoninverted.bit'
     centerElectrode = 23
     PREC_BITS = 16
     pulseTriggered = False
@@ -54,5 +54,5 @@ class hardwareConfiguration(object):
         }
 
     smaDict = {
-        # 'RF bias': channelConfiguration(1, smaOutNumber=1, name='RF bias', boardVoltageRange=(-40., 40.), allowedVoltageRange=(-2.0, 0))
+        'RF bias': channelConfiguration(1, smaOutNumber=1, name='RF bias', boardVoltageRange=(-40., 40.), allowedVoltageRange=(-2.0, 0))
         }

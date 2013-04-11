@@ -22,32 +22,31 @@ from twisted.internet import reactor
 from twisted.internet.defer import returnValue
 from scipy import interpolate
 from scipy.interpolate import UnivariateSpline as UniSpline
-from numpy import genfromtxt, arange
+from numpy import genfromtxt, arange, dot
 from DacConfiguration import hardwareConfiguration as hc
 
 SERVERNAME = 'DAC Server'
 SIGNALID = 270837
 
-class Voltage(object):
-    def __init__(self, channel, analogVoltage = None, digitalVoltage = None):
+class Voltage( object ):
+    def __init__( self, channel, analogVoltage = None, digitalVoltage = None ):
         self.channel = channel
         self.digitalVoltage = digitalVoltage
         self.analogVoltage = analogVoltage
-            
-    def program(self, setNum):
+
+    def program( self, setNum ):
         '''
         Compute the hex code to progam this voltage
         '''
         self.setNum = setNum
         if self.analogVoltage is not None:
-            c = self.channel.calibration
             (vMin, vMax) = self.channel.allowedVoltageRange
             if self.analogVoltage < vMin: self.analogVoltage = vMin
             if self.analogVoltage > vMax: self.analogVoltage = vMax
-            self.digitalVoltage = int(round(sum( [c[n]*self.analogVoltage**n for n in range(len(c)) ] )))            
+            self.digitalVoltage = self.channel.computeDigitalVoltage(self.analogVoltage)
         self.hexRep = self.__getHexRep()
         
-    def __getHexRep(self):
+    def __getHexRep( self ):
         '''
         If pulse triggering is enabled in the configuration file,
         then always write set 1 to the DAC. However, still keep track
@@ -62,7 +61,7 @@ class Voltage(object):
         big = value + port + setN + [False]
         return self.__g(big[8:16]) + self.__g(big[:8]) + self.__g(big[24:32]) + self.__g(big[16:24])
             
-    def __f(self, num, bits): # binary representation of values in the form of a list
+    def __f( self, num, bits ): # binary representation of values in the form of a list
         listy = [False for i in range(bits)]
         for i in range(len(listy)):
             if num >= 2**(len(listy)-i-1):
@@ -70,30 +69,30 @@ class Voltage(object):
                 num -= 2**(len(listy)-i-1)
         return listy
 
-    def __g(self, listy): # byte to hex
+    def __g( self, listy ): # byte to hex
         num = 0
         for i in range(8):
             if listy[i]:
                 num += 2**(7-i)
         return chr(num)
         
-class Queue(object):
-    def __init__(self):
+class Queue( object ):
+    def __init__( self ):
         self.currentSet = 1
         self.setDict = {i: [] for i in range(1, hc.maxCache + 1)}
 
-    def advance(self):
+    def advance( self ):
         self.currentSet = (self.currentSet % hc.maxCache) + 1
 
-    def reset(self):
+    def reset( self ):
         self.currentSet = 1
 
-    def insert(self, v):
+    def insert( self, v ):
         ''' Always insert voltages to the current queue position '''
         v.program(self.currentSet)
         self.setDict[self.currentSet].append(v)
 
-    def get(self):        
+    def get( self ):        
         v = self.setDict[self.currentSet].pop(0)
         return v
 
@@ -104,8 +103,9 @@ class DACServer( LabradServer ):
     """
     name = SERVERNAME
     onNewUpdate = Signal(SIGNALID, 'signal: ports updated', 's')
-    currentPosition = 0
     registryPath = [ '', 'Servers', hc.EXPNAME + SERVERNAME ]
+    currentPosition = 0
+    CfileName = 'defaults'
     
     @inlineCallbacks
     def initServer( self ):
@@ -113,26 +113,26 @@ class DACServer( LabradServer ):
         self.registry = self.client.registry        
         self.dacDict = dict(hc.elecDict.items() + hc.smaDict.items())
         self.queue = Queue()
-        self.current = {}
+        self.multipoles = hc.defaultMultipoles
+        self.currentVoltages = {}
         self.listeners = set() 
         yield self.setCalibrations()
-        self.setPreviousVoltages()        
+        yield self.setPreviousControlFile()
+        # self.setPreviousVoltages()        
 
     @inlineCallbacks
     def setCalibrations( self ):
         ''' Go through the list of sma outs and electrodes and try to detect calibrations '''
-        degreeOfCalibration = 3 # 1st order fit. update this to auto-detect
         yield self.registry.cd(self.registryPath + ['Calibrations'], True)
         subs, keys = yield self.registry.dir()
-        sbs = ''
-        for s in subs: sbs += s + ', '
-        print 'Calibrated channels: ' + sbs
+        print 'Calibrated channels: ', subs
         for chan in self.dacDict.values():
             chan.voltageList = []
             c = [] # list of calibration coefficients in form [c0, c1, ..., cn]
             if str(chan.dacChannelNumber) in subs:
                 yield self.registry.cd(self.registryPath + ['Calibrations', str(chan.dacChannelNumber)])
-                for n in range( degreeOfCalibration + 1):
+                dirs, coeffs = yield self.registry.dir()
+                for n in range( len(coeffs) ):
                     e = yield self.registry.get( 'c'+str(n) )
                     c.append(e)
                 chan.calibration = c
@@ -140,26 +140,36 @@ class DACServer( LabradServer ):
                 (vMin, vMax) = chan.boardVoltageRange
                 prec = hc.PREC_BITS
                 chan.calibration = [2**(prec - 1), float(2**(prec))/(vMax - vMin) ]
+        yield self.registry.cd(self.registryPath)
+    
+    @inlineCallbacks
+    def setPreviousControlFile( self ):
+        try:
+            CfilePath = yield self.registry.get('MostRecentCfile')
+            yield self.setMultipoleControlFile(0, CfilePath)
+        except: 
+            self.multipoleMatrix = {k: {j: [.1] for j in self.multipoles} for k in hc.elecDict.keys()} # if no previous Cfile was set, set all entries to 0.1
+            self.numCols = 1
+            yield self.registry.cd(self.registryPath + ['defaults'], True)
+            self.setMultipoleValues(0, [(k, 0) for k in self.multipoles])
+            self.setIndividualAnalogVoltages(0, [(k, 0) for s in hc.smaDict.keys()])
 
     @inlineCallbacks
     def setPreviousVoltages( self ):
         ''' Get/set previous Cfile, multipole values, and sma voltages from registry '''
-        yield self.registry.cd(self.registryPath + ['smaVoltages'], True)
+        yield self.registry.cd(self.registryPath + [self.CfileName], True)
+        try: self.currentPosition = yield self.registry.get('position')
+        except: self.currentPosition = 0
+        
+        try: ms = yield self.registry.get('MultipoleSet')         
+        except: ms = [(k, 0) for k in self.multipoles] # if no previous multipole values have been recorded, set them to zero. 
+        yield self.setMultipoleValues(0, ms)        
+        
+        yield self.registry.cd(self.registryPath + [self.CfileName, 'smaVoltages'], True)
         for k in hc.smaDict.keys():
             try: av = yield self.registry.get(k)
             except: av = 0. # if no previous voltage has been recorded, set to zero. 
             yield self.setIndividualAnalogVoltages(0, [(k, av)])
-        # yield self.setIndividualDigitalVoltages(0, [('RF bias', 32768)], 0)
-        yield self.registry.cd(self.registryPath)
-        try:
-            CfilePath = yield self.registry.get('MostRecent')
-            yield self.setMultipoleControlFile(0, CfilePath)
-        except: 
-            self.multipoleMatrix = {k: {j: .1 for j in hc.multipoles} for k in hc.elecDict.keys()} # if no previous Cfile was set, set all entries to zero.
-            self.numCols = 1
-        try: ms = yield self.registry.get('MultipoleSet')                    
-        except: ms = [(k, 0) for k in hc.multipoles] # if no previous multipole values have been recorded, set them to zero. 
-        yield self.setMultipoleValues(0, ms)
 
     @inlineCallbacks
     def sendToPulser(self, c):
@@ -171,7 +181,7 @@ class DACServer( LabradServer ):
             v = self.queue.get()            
             yield self.pulser.set_dac_voltage(v.hexRep)
             print v.channel.name, v.analogVoltage
-            self.current[v.channel.name] = v.analogVoltage
+            self.currentVoltages[v.channel.name] = v.analogVoltage
             self.notifyOtherListeners(c)
 
     def initContext(self, c):
@@ -192,7 +202,7 @@ class DACServer( LabradServer ):
         Pass digitalVoltages, a list of digital voltages to update.
         Currently, there must be one for each port.
         """
-        l = zip(range(1, hc.numDacChannels + 1), digitalVoltages)
+        l = zip(self.dacDict.keys(), digitalVoltages)
         self.setIndivDigVoltages(c, l, setNum)
 
     @setting( 1 , "Set Analog Voltages", analogVoltages = '*v', setNum = 'i', returns = '')
@@ -201,8 +211,8 @@ class DACServer( LabradServer ):
         Pass analogVoltages, a list of analog voltages to update.
         Currently, there must be one for each port.
         """
-        l = zip(range(1, hc.numDacChannels + 1), analogVoltages)
-        yield self.setIndivAnaVoltages(c, l, setNum)
+        l = zip(self.dacDict.keys(), analogVoltages)
+        yield self.setIndividualAnalogVoltages(c, l)
 
     @setting( 2, "Set Individual Digital Voltages", digitalVoltages = '*(si)', returns = '')
     def setIndividualDigitalVoltages(self, c, digitalVoltages, setNum = 0):
@@ -223,8 +233,8 @@ class DACServer( LabradServer ):
         for (port, av) in analogVoltages:
             self.queue.insert(Voltage(self.dacDict[port], analogVoltage = av))
             if self.dacDict[port].smaOutNumber:
-                self.registry.cd(self.registryPath + ['smaVoltages'])
-                self.registry.set(port, av)
+                yield self.registry.cd(self.registryPath + [self.CfileName, 'smaVoltages'])
+                yield self.registry.set(port, av)
         yield self.sendToPulser(c)
 
     @setting( 4, "Get Analog Voltages", returns = '*(sv)' )
@@ -232,83 +242,106 @@ class DACServer( LabradServer ):
         """
         Return the current voltage
         """
-        return self.current.items()
+        return self.currentVoltages.items()
     
     @setting( 5, "Set Multipole Control File", CfilePath = 's')
-    def setMultipoleControlFile(self, c, CfilePath):                
-        data = genfromtxt(CfilePath)
+    def setMultipoleControlFile(self, c, CfilePath):
+        data = open(CfilePath)
+        mults = data.readline().rstrip('\n').split(':')
+        if len(mults) > 1: 
+            self.multipoles = mults[1].split(',')
+        else: 
+            data = open(CfilePath)
+        data = genfromtxt(data)
         self.numCols = data[1].size
-        if self.numCols == 1: 
-            self.multipoleMatrix = {elec: {mult: data[int(elec) + index*hc.numElectrodes - 1] for index, mult in enumerate(hc.multipoles)} for elec in hc.elecDict.keys()}
-            self.positionList = data[-1]
-        else: self.interpolateMultipoleMatrix(data)
-
+        if self.numCols == 1: data = [[data[i]] for i in range(data.size)]
+        self.multipoleMatrix = {elec: {mult: data[int(elec) + index*len(hc.elecDict) - 1] for index, mult in enumerate(self.multipoles)} for elec in hc.elecDict.keys()}
+        self.positionList = data[-1]
+        self.CfileName = CfilePath.split('/')[-1]
+        yield self.setPreviousVoltages()
         yield self.registry.cd(self.registryPath)
-        yield self.registry.set('MostRecent', CfilePath)
-
-    def interpolateMultipoleMatrix( self, data ):
-        ''' fit individual components of multiple Cfiles to a spline '''
-        numElectrodes = (data[:,1].size - 1) / len(hc.multipoles)
-        numPositions = 10*(self.numCols - 1.)
-        inc = (self.numCols-1)/numPositions
-        partition = arange(0, (numPositions + 1) * inc, inc)
-        splineFit = {elec: {mult: UniSpline(range(self.numCols) , data[int(elec) + index*hc.numElectrodes - 1], s = 0 ) for index, mult in enumerate(hc.multipoles)} for elec in hc.elecDict.keys()}
-        self.multipoleMatrix = {elec: {mult: splineFit[elec][mult](partition) for index, mult in enumerate(hc.multipoles)} for elec in hc.elecDict.keys()}
-        positionFit = interpolate.interp1d(range(self.numCols) , data[numElectrodes * len(hc.multipoles)], 'linear')
-        self.positionList = positionFit(partition)
+        yield self.registry.set('MostRecentCfile', CfilePath)
 
     @setting( 6, "Set Multipole Values", ms = '*(sv): dictionary of multipole values')
     def setMultipoleValues(self, c, ms):
         """
         set should be a dictionary with keys 'Ex', 'Ey', 'U2', etc.
         """
-        self.multipoleSet = {}
-        for (k,v) in ms:
-            self.multipoleSet[k] = v
-        yield self.setVoltages(c, self.currentPosition)
+        self.multipoleSet = {m: v for (m,v) in ms}
+        voltageMatrix = {}
+        for e in hc.elecDict.keys():
+            voltageMatrix[e] = [0. for n in range(self.numCols)]
+            for n in range(self.numCols):
+                for m in self.multipoles: voltageMatrix[e][n] += self.multipoleMatrix[e][m][n] * self.multipoleSet[m]
+        if self.numCols > 1:
+            voltageMatrix = self.interpolateVoltageMatrix(voltageMatrix)
+        self.voltageMatrix = voltageMatrix
+        yield self.setVoltages(c, newPosition = self.currentPosition)
 
-        yield self.registry.cd(self.registryPath)
+        yield self.registry.cd(self.registryPath + [self.CfileName], True)
         yield self.registry.set('MultipoleSet', ms)
 
-    @setting( 7, "Get Multipole Values",returns='*(s,v)')
+    def interpolateVoltageMatrix( self, voltageMatrix ):
+        # fix step size here
+        numPositions = 10*(self.numCols - 1.)
+        inc = (self.numCols-1)/numPositions
+        partition = arange(0, (numPositions + 1) * inc, inc)
+        splineFit = {elec: UniSpline(range(self.numCols) , voltageMatrix[elec], s = 0 ) for elec in hc.elecDict.keys()}
+        interpolatedVoltageMatrix = {elec: splineFit[elec](partition) for elec in hc.elecDict.keys()}
+        return interpolatedVoltageMatrix
+
+    @setting( 7, "Get Multipole Values",returns='*(s, v)')
     def getMultipoleValues(self, c):
         """
         Return a list of multipole voltages
         """
         return self.multipoleSet.items()
+
+    @setting( 8, "Get Multipole Names",returns='*s')
+    def getMultipoleNames(self, c):
+        """
+        Return a list of multipole voltages
+        """
+        return self.multipoles
                         
-    @setting( 8, "Set Voltages", newPosition = 'i')
-    def setVoltages(self, c, newPosition = currentPosition, advance = 0, reset = 0):
+    @inlineCallbacks
+    def setVoltages(self, c, newPosition = currentPosition, writeSMAs = False):
         n = newPosition
         newVoltageSet = []
-        # apply multipole matrix to multipole vector
-        for e in hc.elecDict.keys():        
-            av = 0
-            for m in hc.multipoles:                 
-                if self.numCols == 1: av += self.multipoleMatrix[e][m] * self.multipoleSet[m] # numpy.0-dimnl_array[0] throws error
-                else: av += self.multipoleMatrix[e][m][n] * self.multipoleSet[m] # numpy.array[0] = scalar
+        for e in hc.elecDict.keys():
+            av = self.voltageMatrix[e][n]
             newVoltageSet.append( (e, av) )
+
         # if changing DAC FPGA voltage set, write sma voltages. 
-        if advance or reset:
-            for s in hc.smaDict.keys():
-                newVoltageSet.append( (s, self.current[s]) )
+        if writeSMAs: 
+            for s in hc.smaDict.keys(): newVoltageSet.append( (s, self.currentVoltages[s]) )
+        newVoltageSet.append(newVoltageSet[len(newVoltageSet)-1])
         yield self.setIndividualAnalogVoltages(c, newVoltageSet)
         self.currentPosition = n
+
+        yield self.registry.cd(self.registryPath)
+        yield self.registry.set('position', self.currentPosition)
 
     @setting( 9, "Set First Voltages")
     def setFirstVoltages(self, c):
         self.queue.reset()
-        yield self.setVoltages(c)
+        yield self.setVoltages(c, writeSMAs = True)
 
     @setting( 10, "Set Next Voltages", newPosition = 'i')
     def setFutureVoltages(self, c, newPosition):
         self.queue.advance()
-        yield self.setVoltages(c, newPosition = newPosition)        
-    
-    @setting( 11, "Get Position", returns = 'i')
+        yield self.setVoltages(c, newPosition, True)
+
+    @setting( 11, "Set Next Voltages New Multipoles", multipoles = '*(sv)')
+    def setNextVoltagesNewMultipoles(self, c, multipoles):
+        self.queue.advance()
+        yield self.setMultipoleValues(c, multipoles)
+        yield self.setIndividualAnalogVoltages(0, [(s, self.currentVoltages[s]) for s in hc.smaDict.keys()])
+
+    @setting( 12, "Get Position", returns = 'i')
     def getPosition(self, c):
         return self.currentPosition
-                
+
 if __name__ == "__main__":
     from labrad import util
     util.runServer( DACServer() )
@@ -318,6 +351,7 @@ Notes for setting up DACSERVER:
 
 example of a Cfile corresponding to a trap w/ 23 electrodes, 4 multipole values, and trap position of 850um:
 
+multipoles: Ex, Ey, Ez, U2
 Ex_1
 Ex_2
 .
@@ -331,10 +365,12 @@ Ey_1
 U2_23
 850
 
-Be sure to specify multipole names in DacCanfiguration.py, e.g., multipoles = ['Ex', Ey', 'Ez', 'U2'].
+The first line, "multipoles: Ex, ...", lets you specify a unique set of multipoles for each Cfile. It is optional.
+If you choose not to include it, the server will instead use the default multipoles specified in DacConfiguration.py
 
 
-or, if you intend to do shuttling, place Cfiles next to each other:
+If you intend to do shuttling, place Cfiles next to each other:
+multipoles: Ex, Ey, Ez, U2
 Ex_1.1   Ex_1.2
 Ex_2.1   Ex_2.2
 .        .
