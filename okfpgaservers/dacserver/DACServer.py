@@ -17,6 +17,7 @@ timeout = 20
 ### END NODE INFO
 '''
 
+import sys
 from labrad.server import LabradServer, setting, Signal, inlineCallbacks
 from twisted.internet import reactor
 from twisted.internet.defer import DeferredLock, inlineCallbacks, returnValue, Deferred
@@ -157,7 +158,7 @@ class DACServer( LabradServer ):
         
         try: ms = yield self.registry.get('MultipoleSet')         
         except: ms = [(k, 0) for k in self.multipoles] # if no previous multipole values have been recorded, set them to zero. 
-        yield self.setMultipoleValues(0, ms)        
+        yield self.setMultipoleValues(0, ms)      
         
         yield self.registry.cd(self.registryPath + [self.CfileName, 'smaVoltages'], True)
         for k in hc.smaDict.keys():
@@ -178,7 +179,10 @@ class DACServer( LabradServer ):
         if self.numCols == 1: data = [[data[i]] for i in range(data.size)]
         self.multipoleMatrix = {elec: {mult: data[int(elec) + index*len(hc.elecDict) - 1] for index, mult in enumerate(self.multipoles)} for elec in hc.elecDict.keys()}
         self.positionList = data[-1]
-        self.CfileName = CfilePath.split('/')[-1]
+
+        if sys.platform.startswith('linux'): self.CfileName = CfilePath.split('/')[-1]
+        elif sys.platform.startswith('win'): self.CfileName = CfilePath.split('\\')[-1]
+        
         yield self.setPreviousVoltages()
         yield self.registry.cd(self.registryPath)
         yield self.registry.set('MostRecentCfile', CfilePath)
@@ -223,18 +227,17 @@ class DACServer( LabradServer ):
         if writeSMAs: 
             for s in hc.smaDict.keys(): newVoltageSet.append( (s, self.currentVoltages[s]) )
         yield self.setIndividualAnalogVoltages(c, newVoltageSet)
+        newVoltageSet.append(newVoltageSet[len(newVoltageSet)-1])
         self.currentPosition = n
 
-        yield self.registry.cd(self.registryPath)
+        yield self.registry.cd(self.registryPath + [self.CfileName])
         yield self.registry.set('position', self.currentPosition)
 
     @inlineCallbacks
     def writeToFPGA(self, c):
-        # self.api.resetFIFODAC()
         yield self.resetFIFODAC()
         for i in range(len(self.queue.setDict[self.queue.currentSet])):
             v = self.queue.get()            
-            # self.api.setDACVoltage(v.hexRep)
             yield self.setDACVoltages(v.hexRep)
             print v.channel.name, v.analogVoltage
             self.currentVoltages[v.channel.name] = v.analogVoltage
@@ -298,7 +301,7 @@ class DACServer( LabradServer ):
     @setting( 6, "Set First Voltages")
     def setFirstVoltages(self, c):
         self.queue.reset()
-        yield self.setVoltages(c, writeSMAs = True)
+        yield self.setVoltages(c, newPosition = self.currentPosition, writeSMAs = True)
 
     @setting( 7, "Set Next Voltages", newPosition = 'i')
     def setFutureVoltages(self, c, newPosition):
@@ -389,4 +392,22 @@ Ey_1.1   .
 .        .
 U2_23.1  U2_23.2
 850      900
+
+
+    def getPlatformInfo(self):
+        Figures out if running on Windows or Linux and returns platform
+        dependent information
+        if sys.platform.startswith('win'):
+            portrange = range(1,20)
+            prefix = 
+            portstring = 'COM{}'
+            message = 'cannot find'
+        elif sys.platform.startswith('linux'):
+            portrange = range(0,20)
+            prefix = '/dev/'
+            portstring = 'ttyUSB{}'
+            message = 'could not open'
+        elif sys.platform.startswith('darwin'):
+            raise Exception("Not Implemented on Mac")
+        return portrange,prefix,portstring,message
 """

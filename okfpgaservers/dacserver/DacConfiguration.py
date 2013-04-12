@@ -25,7 +25,7 @@ class hardwareConfiguration(object):
     okDeviceFile = 'control_nonnoninverted.bit'
     centerElectrode = 23
     PREC_BITS = 16
-    pulseTriggered = False
+    pulseTriggered = True
     maxCache = 126
     elecDict = {
         '01': channelConfiguration(28, trapElectrodeNumber=1),
@@ -50,7 +50,7 @@ class hardwareConfiguration(object):
         '20': channelConfiguration(3, trapElectrodeNumber=20),
         '21': channelConfiguration(20, trapElectrodeNumber=21),
         '22': channelConfiguration(12, trapElectrodeNumber=22),
-        '23': channelConfiguration(1, trapElectrodeNumber=23) #6
+        '23': channelConfiguration(6, trapElectrodeNumber=23) #6
         }
 
     smaDict = {

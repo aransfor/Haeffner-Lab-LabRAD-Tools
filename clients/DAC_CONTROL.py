@@ -14,6 +14,7 @@ SIGNALID2 = 270835
 class MULTIPOLE_CONTROL(QtGui.QWidget):
     def __init__(self, reactor, parent=None):
         super(MULTIPOLE_CONTROL, self).__init__(parent)
+        self.updating = False
         self.reactor = reactor
         self.connect()
         
@@ -62,13 +63,11 @@ class MULTIPOLE_CONTROL(QtGui.QWidget):
     @inlineCallbacks        
     def selectCFile(self):
         fn = QtGui.QFileDialog().getOpenFileName()
+        self.updating = True
         yield self.dacserver.set_multipole_control_file(str(fn))
-        multipoles = yield self.dacserver.get_multipole_values()
-        # for k in self.controls.keys():
-        #     self.ctrlLayout.removeWidget(self.controls[k])
-        #     self.ctrlLayout.removeWidget(self.multipoleFileSelectButton)
-        # self.controls = {}
-        # self.makeGUI
+        for i in range(self.ctrlLayout.count()): self.ctrlLayout.itemAt(i).widget().close()
+        self.updating = False
+        yield self.makeGUI()
         self.inputHasUpdated()
         
     @inlineCallbacks    
@@ -78,6 +77,7 @@ class MULTIPOLE_CONTROL(QtGui.QWidget):
         
     @inlineCallbacks
     def followSignal(self, x, s):
+        if self.updating: return
         multipoles = yield self.dacserver.get_multipole_values()
         for (k,v) in multipoles:
             self.controls[k].setValueNoSignal(v)          
@@ -148,7 +148,7 @@ class CHANNEL_CONTROL (QtGui.QWidget):
 
     def sendToServer(self):
         if self.inputUpdated:            
-            self.dacserver.set_individual_analog_voltages([(self.changedChannel, round(self.controls[self.changedChannel].spinLevel.value(), 3))])
+            self.dacserver.set_individual_analog_voltages([(self.changedChannel, round(self.controls[self.changedChannel].spinLevel.value(), 3))]*17)
             self.inputUpdated = False
             
     @inlineCallbacks    

@@ -118,7 +118,7 @@ class DACServer( LabradServer ):
         self.listeners = set() 
         yield self.setCalibrations()
         yield self.setPreviousControlFile()
-        # self.setPreviousVoltages()        
+        self.setPreviousVoltages()        
 
     @inlineCallbacks
     def setCalibrations( self ):
