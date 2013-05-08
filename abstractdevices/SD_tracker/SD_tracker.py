@@ -32,9 +32,12 @@ class SDTracker(LabradServer):
     def initServer(self):
         self.start_time = time.time()
         self.keep_measurements = conf.keep_measurements
+        self.keep_line_center_measurements = conf.keep_line_center_measurements
+        self.keep_B_measurements = conf.keep_B_measurements
         self.tr = Transitions_SD()
         self.fitter = fitter()
-        self.t_measure = numpy.array([])
+        self.t_measure_line_center = numpy.array([])
+        self.t_measure_B = numpy.array([])
         self.B_field = numpy.array([])
         self.line_center = numpy.array([])
         self.measurements = []
@@ -101,7 +104,8 @@ class SDTracker(LabradServer):
         self.measurements.append((t_measure, name1, f1))
         self.measurements.append((t_measure, name2, f2))
         B,freq = self.tr.energies_to_magnetic_field( ( (name1,f1),(name2,f2) ))
-        self.t_measure = numpy.append(self.t_measure , t_measure)
+        self.t_measure_B = numpy.append(self.t_measure_B , t_measure)
+        self.t_measure_line_center= numpy.append(self.t_measure_line_center, t_measure)
         self.B_field = numpy.append(self.B_field , B['gauss'])
         self.line_center = numpy.append(self.line_center , freq['MHz'])
         #try to save to data vault
@@ -165,7 +169,8 @@ class SDTracker(LabradServer):
     def remove_measurement(self, c, point):
         '''removes the point w, can also be negative to count from the end'''
         try:
-            self.t_measure = numpy.delete(self.t_measure, point)
+            self.t_measure_B = numpy.delete(self.t_measure_B, point)
+            self.t_measure_line_center = numpy.delete(self.t_measure_line_center, point)
             self.B_field = numpy.delete(self.B_field, point)
             self.line_center = numpy.delete(self.line_center, point)
             del self.measurements[2 * point]
@@ -173,7 +178,7 @@ class SDTracker(LabradServer):
         except ValueError or IndexError:
             raise Exception("Point not found")
         self.do_fit()
-    
+
     @setting(8, 'Get Fit History', returns = '*(v[s]v[gauss]v[MHz])')
     def get_fit_history(self, c):
         history = []
@@ -181,25 +186,31 @@ class SDTracker(LabradServer):
             history.append((WithUnit(t,'s'),WithUnit(b_field,'gauss'),WithUnit(freq, 'MHz')))
         return history
     
-    @setting(9, 'History Duration', duration = 'v[s]', returns = 'v[s]')
+    @setting(9, 'History Duration', duration = '*(v[s])', returns = '*(v[s])')
     def get_history_duration(self, c, duration = None):
         if duration is not None:
-            self.keep_measurements = duration['s']
-        return WithUnit(self.keep_measurements,'s')
+            self.keep_B_measurements = duration[0]['s']
+            self.keep_line_center_measurements = duration[1]['s']
+        return ( WithUnit(self.keep_B_measurements,'s'), WithUnit(self.keep_line_center_measurements, 's') )
     
     def do_fit(self):
         self.remove_old_measurements()
         if len(self.t_measure):
-            self.B_fit = self.fitter.fit(self.t_measure, self.B_field)
-            self.line_center_fit = self.fitter.fit(self.t_measure, self.line_center)
+            self.B_fit = self.fitter.fit(self.t_measure_B, self.B_field)
+            self.line_center_fit = self.fitter.fit(self.t_measure_line_center, self.line_center)
         self.onNewFit(None)
     
     def remove_old_measurements(self):
         current_time = time.time() - self.start_time
-        keep = numpy.where( (current_time - self.t_measure) < self.keep_measurements)
-        self.t_measure = self.t_measure[keep]
-        self.B_field = self.B_field[keep]
-        self.line_center = self.line_center[keep]
+        
+        keep_line_center = numpy.where( (current_time - self.t_measure_line_center) < self.keep_line_center_measurements)
+        keep_B = numpy.where( (current_time - self.t_measure_B) < self.keep_B_measurements)
+
+        self.t_measure_line_center = self.t_measure_line_center[keep_line_center]
+        self.t_measure_B = self.t_measure_B[keep_B]
+
+        self.B_field = self.B_field[keep_B]
+        self.line_center = self.line_center[keep_line_center]
         meas = []
         for measurement in self.measurements:
             if current_time - measurement[0] < self.keep_measurements:

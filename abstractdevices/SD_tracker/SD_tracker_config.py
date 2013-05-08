@@ -6,6 +6,8 @@ class config(object):
     fit_order = 1 #order of polynomial for fitting
     
     keep_measurements = 24 * 3600 #seconds, how long to keep measurements
+    keep_line_center_measurements = 24 * 3600
+    keep_B_measurements = 60*5 #seconds
     
     #data vault saving configuration
     save_folder = ['', 'Drift_Tracking', 'Cavity729']
