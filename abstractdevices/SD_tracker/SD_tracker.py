@@ -179,23 +179,26 @@ class SDTracker(LabradServer):
             raise Exception("Point not found")
         self.do_fit()
 
-    @setting(8, 'Get Fit History', returns = '*(v[s]v[gauss]v[MHz])')
+    @setting(8, 'Get Fit History', returns = '(*(v[s]v[gauss]) *(v[s]v[MHz]))')
     def get_fit_history(self, c):
-        history = []
-        for t,b_field,freq in zip(self.t_measure, self.B_field, self.line_center):
-            history.append((WithUnit(t,'s'),WithUnit(b_field,'gauss'),WithUnit(freq, 'MHz')))
-        return history
+        history_B = []
+        history_line_center = []
+        for t,b_field in zip(self.t_measure_B, self.B_field):
+            history_B.append((WithUnit(t,'s'),WithUnit(b_field,'gauss')))
+        for t, freq in zip(self.t_measure_line_center, self.line_center):
+            history_line_center.append((WithUnit(t,'s'), WithUnit(freq, 'MHz')))
+        return [history_B, history_line_center]
     
-    @setting(9, 'History Duration', duration = '*(v[s])', returns = '*(v[s])')
+    @setting(9, 'History Duration', duration = '*v[s]', returns = '*v[s]')
     def get_history_duration(self, c, duration = None):
         if duration is not None:
             self.keep_B_measurements = duration[0]['s']
             self.keep_line_center_measurements = duration[1]['s']
-        return ( WithUnit(self.keep_B_measurements,'s'), WithUnit(self.keep_line_center_measurements, 's') )
+        return [ WithUnit(self.keep_B_measurements,'s'), WithUnit(self.keep_line_center_measurements, 's') ]
     
     def do_fit(self):
         self.remove_old_measurements()
-        if len(self.t_measure):
+        if (len(self.t_measure_B) and len(self.t_measure_line_center)):
             self.B_fit = self.fitter.fit(self.t_measure_B, self.B_field)
             self.line_center_fit = self.fitter.fit(self.t_measure_line_center, self.line_center)
         self.onNewFit(None)
