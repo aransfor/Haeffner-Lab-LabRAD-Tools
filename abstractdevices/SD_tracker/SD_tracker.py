@@ -179,6 +179,26 @@ class SDTracker(LabradServer):
             raise Exception("Point not found")
         self.do_fit()
 
+    @setting(10, 'Remove B Measurement', point = 'i')
+    def remove_B_measurement(self, c, point):
+        '''removes the point w, can also be negative to count from the end'''
+        try:
+            self.t_measure_B = numpy.delete(self.t_measure_B, point)
+            self.B_field = numpy.delete(self.B_field, point)
+        except ValueError or IndexError:
+            raise Exception("Point not found")
+        self.do_fit()
+
+    @setting(11, 'Remove Line Center Measurement', point = 'i')
+    def remove_line_center_measurement(self, c, point):
+        '''removes the point w, can also be negative to count from the end'''
+        try:
+            self.t_measure_line_center = numpy.delete(self.t_measure_line_center, point)
+            self.line_center = numpy.delete(self.line_center, point)
+        except ValueError or IndexError:
+            raise Exception("Point not found")
+        self.do_fit()
+
     @setting(8, 'Get Fit History', returns = '(*(v[s]v[gauss]) *(v[s]v[MHz]))')
     def get_fit_history(self, c):
         history_B = []

@@ -93,9 +93,12 @@ class drift_tracker(QtGui.QWidget):
         self.frequency_table = saved_frequencies_table(self.reactor, suffix = ' MHz', sig_figs = 4)
         self.entry_table = table_dropdowns_with_entry(self.reactor, limits = c.frequency_limit, suffix = ' MHz', sig_figs = 4, favorites = self.favorites)
         self.entry_button = QtGui.QPushButton("Submit")
-        self.remove_button = QtGui.QPushButton("Remove")
-        self.remove_count = QtGui.QSpinBox()
-        self.remove_count.setRange(-20,20)
+        self.remove_B_button = QtGui.QPushButton("Remove B")
+        self.remove_line_center_button = QtGui.QPushButton("Remove Line Center")
+        self.remove_B_count = QtGui.QSpinBox()
+        self.remove_B_count.setRange(-20,20)
+        self.remove_line_center_count = QtGui.QSpinBox()
+        self.remove_line_center_count.setRange(-20,20)
         
         self.track_B_duration = QtGui.QSpinBox()
         self.track_B_duration.setKeyboardTracking(False)
@@ -110,10 +113,17 @@ class drift_tracker(QtGui.QWidget):
         layout.addWidget(self.frequency_table, 0, 0, 1, 1)
         layout.addWidget(self.entry_table, 0, 1 , 1 , 1)
         layout.addWidget(self.entry_button, 1, 1, 1, 1)
-        remove_layout = QtGui.QHBoxLayout() 
-        remove_layout.addWidget(self.remove_count)
-        remove_layout.addWidget(self.remove_button)    
-        update_layout = QtGui.QHBoxLayout()
+        
+        remove_B_layout = QtGui.QHBoxLayout() 
+        remove_B_layout.addWidget(self.remove_B_count)
+        remove_B_layout.addWidget(self.remove_B_button)    
+  
+
+        remove_line_center_layout = QtGui.QHBoxLayout() 
+        remove_line_center_layout.addWidget(self.remove_line_center_count)
+        remove_line_center_layout.addWidget(self.remove_line_center_button)    
+
+        update_layout = QtGui.QHBoxLayout() 
         
         keep_B_layout = QtGui.QHBoxLayout()
         keep_B_layout.addWidget(QtGui.QLabel("Tracking Duration (B)"))
@@ -124,13 +134,15 @@ class drift_tracker(QtGui.QWidget):
         keep_line_center_layout.addWidget(self.track_line_center_duration)
 
         layout.addLayout(update_layout, 2, 1, 1, 1)
-        layout.addLayout(remove_layout, 1, 0, 1, 1)
+        layout.addLayout(remove_B_layout, 1, 0, 1, 1)
+        layout.addLayout(remove_line_center_layout, 2, 0, 1, 1)
         layout.addLayout(keep_B_layout, 3, 1, 1, 1)
         layout.addLayout(keep_line_center_layout, 4, 1, 1, 1)
         return layout
         
     def connect_layout(self):
-        self.remove_button.clicked.connect(self.on_remove)
+        self.remove_B_button.clicked.connect(self.on_remove_B)
+        self.remove_line_center_button.clicked.connect(self.on_remove_line_center)
         self.entry_button.clicked.connect(self.on_entry)
         self.track_B_duration.valueChanged.connect(self.on_new_B_track_duration)
         self.track_line_center_duration.valueChanged.connect(self.on_new_line_center_track_duration)
@@ -162,14 +174,21 @@ class drift_tracker(QtGui.QWidget):
             self.updater.start(rate, now = True)
             
     @inlineCallbacks
-    def on_remove(self, clicked):
-        to_remove = self.remove_count.value()
+    def on_remove_B(self, clicked):
+        to_remove = self.remove_B_count.value()
         server = self.cxn.servers['SD Tracker']
         try:
-            yield server.remove_measurement(to_remove)
+            yield server.remove_b_measurement(to_remove)
         except self.Error as e:
             self.displayError(e.msg)
-    
+    @inlineCallbacks
+    def on_remove_line_center(self, clicked):
+        to_remove = self.remove_line_center_count.value()
+        server = self.cxn.servers['SD Tracker']
+        try:
+            yield server.remove_line_center_measurement(to_remove)
+        except self.Error as e:
+            self.displayError(e.msg)    
     @inlineCallbacks
     def on_entry(self, clicked):
         server = self.cxn.servers['SD Tracker']
