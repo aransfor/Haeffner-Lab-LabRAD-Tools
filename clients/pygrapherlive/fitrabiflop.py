@@ -12,7 +12,7 @@ class FitRabiflop(CurveFit):
         self.parent = parent
         self.curveName = 'Rabi Flop'
         self.parameterNames = ['nbar', 'Rabi Frequency', 'Delta','Delta Fluctuations','Trap Frequency','Sideband','nmax', 'projection']
-        self.parameterValues = [5.0,70000.0, ,0.0,0.0,2.8,0,1000, np.pi/4]
+        self.parameterValues = [5.0,70000.0,0.0,0.0,2.8,0,1000, np.pi/4]
         self.parameterFit = [True,True, False,False,False,False,False, False]
    
     def fitFunc(self, x, p):
